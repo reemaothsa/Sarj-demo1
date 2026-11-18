@@ -210,7 +210,7 @@ footer{padding-block:28px;color:var(--muted);font-size:13px}
     </div>
     <div class="heard" id="heard"></div>
     <div class="log" id="log" aria-live="polite"></div>
-    <div class="note" id="liveNote">المايكروفون الحي يعمل في متصفح Chrome على الكمبيوتر وفي تطبيق Claude للكمبيوتر. على الآيباد والجوال: اكتب ما تقوله، أو استخدم الطريقة الثانية بتسجيل صوتي.</div>
+    <div class="note" id="liveNote">المايكروفون الحي يعمل في متصفح Chrome وSafari الحديث. على الآيباد والجوال: اكتب ما تقوله، أو استخدم الطريقة الثانية بتسجيل صوتي.</div>
   </div>
   <div class="panel live">
     <h3>٢. ارفع تسجيلاً بصوتك</h3>
@@ -588,7 +588,7 @@ function browserMic(){
   rec.onstart=()=>{live.listening=true;L.mic.setAttribute('aria-pressed','true');};
   rec.onend=()=>{live.listening=false;L.mic.setAttribute('aria-pressed','false');};
   rec.onerror=e=>{live.listening=false;L.mic.setAttribute('aria-pressed','false');
-    L.note.textContent=(e.error==='not-allowed'||e.error==='service-not-allowed')?'المايكروفون ممنوع هنا. داخل Claude الصفحة محمية ولا تسمح بالمايك؛ افتح رابط الموقع المستقل في سفاري واسمح بالمايكروفون، أو اكتب.':'المايكروفون توقف ('+e.error+'). اضغط 🎙 مرة ثانية.';};
+    L.note.textContent=(e.error==='not-allowed'||e.error==='service-not-allowed')?'المايكروفون ممنوع. اسمح للموقع باستخدام المايكروفون من إعدادات المتصفح، أو اكتب.':'المايكروفون توقف ('+e.error+'). اضغط 🎙 مرة ثانية.';};
   rec.onresult=ev=>{for(let i=ev.resultIndex;i<ev.results.length;i++){const r=ev.results[i],txt=r[0].transcript;
     if(r.isFinal){L.heard.textContent='سمعت: '+txt;judge(txt,true);}else{L.heard.innerHTML=`<span class="p">${txt}</span>`;judge(txt,false);}}};
   try{rec.start();}catch(e){L.note.textContent='تعذر تشغيل المايكروفون.';}
@@ -600,7 +600,7 @@ L.mic.onclick=()=>{
   live.dict.start().catch(e=>{L.note.textContent=e&&e.code==='not_granted'?'رُفض إذن المايكروفون. استخدم الكتابة.':'تعذر تشغيل المايكروفون، جرّب مرة ثانية أو اكتب.';});
 };
 (async()=>{
-  const [s,t,d]=await Promise.all(['sample','tts','dictation'].map(n=>window.claude?claude.use(n).catch(()=>null):Promise.resolve(null)));
+  const [s,t,d]=await Promise.all(['sample','tts','dictation'].map(()=>Promise.resolve(null)));
   live.sample=s; live.tts=t; live.dict=d;
   if(t){t.onState(({state})=>{L.tts.textContent=state==='speaking'?'· تتكلم بصوت':'';});}
   if(d){L.mic.hidden=false; L.note.textContent='اضغط 🎙 وتكلم أثناء كلام الوكيل. أثناء الاستماع يظهر كلام الوكيل نصاً فقط (المتصفح لا يسمح بالصوت والمايكروفون معاً).';
@@ -608,7 +608,7 @@ L.mic.onclick=()=>{
     d.onPartial(({text})=>{L.heard.innerHTML=`<span class="p">${text}</span>`;judge(text,false);});
     d.onFinal(({text})=>{L.heard.textContent='سمعت: '+text;judge(text,true);});}
   if(!d&&SRec){L.mic.hidden=false;L.note.textContent='اضغط 🎙 واسمح بالمايكروفون، وتكلم أثناء كلام الوكيل. استخدم سماعة أذن إن أمكن: بدونها يلتقط المايك صوت الوكيل، والنظام يتعرف عليه كصدى ويتجاهله.';}
-  if(!s){L.note.textContent+=' الرد هنا من وكيل مدمج بقواعد بسيطة؛ داخل Claude يرد الذكاء الاصطناعي.';}
+  if(!s){L.note.textContent+=' الرد هنا من وكيل مدمج بقواعد بسيطة.';}
 })();
 renderAgent(); L.agentLine.innerHTML='<span class="meta">اضغط «ابدأ المكالمة» وستبدأ سارة الكلام.</span>';
 
@@ -670,7 +670,7 @@ recBtn.onclick=async()=>{
       F.state.textContent=s<st?`سجّل ردك على الترحيب الآن… (${s.toFixed(0)} ث)`:`الوكيل «يتكلم» الآن: قاطعه أو قل «إيه»… (${s.toFixed(0)} ث) — اضغط إيقاف للتحليل`;
       if(s>30)mrec.stop();},250);
     recBtn.textContent='⏹ إيقاف وتحليل';
-  }catch(e){F.state.textContent='المايكروفون ممنوع هنا. داخل Claude الصفحة محمية؛ افتح الرابط المستقل في سفاري واسمح بالمايك، أو ارفع تسجيلاً من المذكرات الصوتية.';}
+  }catch(e){F.state.textContent='المايكروفون ممنوع. اسمح للموقع باستخدام المايكروفون من إعدادات المتصفح، أو ارفع تسجيلاً من المذكرات الصوتية.';}
 }; F.start.addEventListener('change',()=>{if(pcm)analyzeFile();});
 function showFile(r){
   const stop=r.decisions.find(d=>d.decision==='STOP');
