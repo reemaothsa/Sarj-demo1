@@ -137,6 +137,13 @@ footer{padding-block:28px;color:var(--muted);font-size:13px}
 .agentline .w.cut{opacity:.25;text-decoration:line-through}
 .agentline .stopmark{display:inline-block;font-family:var(--mono);font-size:12px;color:#fff;background:var(--stop);border-radius:4px;padding:0 6px;margin-inline:6px;vertical-align:middle}
 .who2{font-size:13px;color:var(--muted);display:flex;gap:8px;align-items:center}
+.voicebar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;font-size:14px;padding:10px;border:1px solid var(--line);border-radius:8px;background:var(--bg)}
+.voicebar select{font:inherit;font-size:14px;padding:6px 8px;border:1px solid var(--line);border-radius:6px;background:var(--paper);color:var(--ink);max-width:100%}
+.voicebar .seg{display:inline-flex;border:1px solid var(--accent);border-radius:8px;overflow:hidden}
+.voicebar .seg button{font:inherit;font-size:14px;border:0;padding:6px 14px;background:transparent;color:var(--accent);cursor:pointer}
+.voicebar .seg button[aria-pressed="true"]{background:var(--accent);color:#fff}
+.voicebar input[type=range]{width:110px;accent-color:var(--accent)}
+.voicebar .vhint{flex-basis:100%;color:var(--muted);font-size:13px;line-height:1.6}
 .talkrow{display:flex;gap:8px;align-items:stretch;flex-wrap:wrap}
 .talkrow input{flex:1;min-width:200px;font:inherit;font-size:17px;padding:10px 12px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink)}
 .talkrow input:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
@@ -200,7 +207,14 @@ footer{padding-block:28px;color:var(--muted);font-size:13px}
   <div class="cols">
   <div class="panel live">
     <h3>١. مكالمة حيّة مع الوكيل</h3>
-    <div class="who2"><span class="sw" style="background:var(--agent)"></span>سارة، خدمة التوصيل <span id="ttsState" class="meta"></span></div>
+    <div class="who2"><span class="sw" style="background:var(--agent)"></span><span id="agentName">سارة</span>، خدمة التوصيل <span id="ttsState" class="meta"></span></div>
+    <div class="voicebar" id="voiceBar">
+      <span class="seg" role="group" aria-label="جنس الوكيل"><button type="button" data-g="f" aria-pressed="true">أنثى</button><button type="button" data-g="m" aria-pressed="false">ذكر</button></span>
+      <select id="voiceSel" aria-label="صوت الوكيل"></select>
+      <label>السرعة <input type="range" id="rateIn" min="0.7" max="1.3" step="0.05" value="1"></label>
+      <button class="btn ghost" type="button" id="voiceTest">▶ جرّب الصوت</button>
+      <div class="vhint" id="voiceHint"></div>
+    </div>
     <div class="agentline" id="agentLine" aria-live="polite"></div>
     <div class="talkrow">
       <button class="btn" id="startCall">ابدأ المكالمة</button>
@@ -479,13 +493,61 @@ for(const [id,list] of Object.entries(ex)){const el=document.getElementById(id);
 
 /* ---------- live call ---------- */
 const synth=window.speechSynthesis||null; let arVoice=null;
-function pickVoice(){if(!synth)return;const vs=synth.getVoices();arVoice=vs.find(v=>/^ar[-_]SA/i.test(v.lang))||vs.find(v=>/^ar/i.test(v.lang))||null;}
-if(synth){pickVoice();try{synth.onvoiceschanged=pickVoice;}catch(e){}}
+const VOICE_M=/maged|majed|hamed|naayf|shakir|tarik|hamdan|fahed|omar|bassel|moaz|male|ذكر/i;
+const VOICE_F=/laila|mariam|zariyah|hoda|salma|amina|amira|fatima|layla|noura|zeina|sana|female|google|أنثى/i;
+const VOICE_GOOD=/enhanced|premium|neural|natural|online|siri|google|محسّن|محسن/i;
+const voiceCfg={g:'f',uri:null,rate:1};
+try{const sv=JSON.parse(localStorage.getItem('ttVoice')||'null');if(sv)Object.assign(voiceCfg,sv);}catch(e){}
+function saveVoice(){try{localStorage.setItem('ttVoice',JSON.stringify(voiceCfg));}catch(e){}}
+function arVoices(){return synth?synth.getVoices().filter(v=>/^ar/i.test(v.lang)):[];}
+function voiceGender(v){return VOICE_M.test(v.name)?'m':VOICE_F.test(v.name)?'f':'?';}
+function voiceScore(v,g){let sc=0;if(/^ar[-_]SA/i.test(v.lang))sc+=4;else if(/^ar[-_](AE|KW|QA|BH|OM)/i.test(v.lang))sc+=2;
+  if(VOICE_GOOD.test(v.name))sc+=3;const vg=voiceGender(v);if(vg===g)sc+=5;else if(vg!=='?')sc-=5;return sc;}
+function genderLabel(g){return g==='m'?'ذكر':'أنثى';}
+function fillVoices(){
+  const sel=document.getElementById('voiceSel');if(!sel)return;const vs=arVoices();
+  if(!vs.length){sel.innerHTML='<option>لا يوجد صوت عربي في هذا الجهاز</option>';sel.disabled=true;arVoice=null;updateHint();return;}
+  sel.disabled=false;
+  const sorted=vs.slice().sort((a,b)=>voiceScore(b,voiceCfg.g)-voiceScore(a,voiceCfg.g));
+  sel.innerHTML=sorted.map(v=>{const vg=voiceGender(v);return `<option value="${v.voiceURI}">${v.name} · ${v.lang}${vg!=='?'?' · '+genderLabel(vg):''}</option>`;}).join('');
+  let pick=voiceCfg.uri&&sorted.find(v=>v.voiceURI===voiceCfg.uri);
+  if(!pick||(voiceGender(pick)!=='?'&&voiceGender(pick)!==voiceCfg.g))pick=sorted[0];
+  arVoice=pick;sel.value=pick.voiceURI;updateHint();
+}
+function pitchFor(){ // only nudge the pitch when the chosen voice is not already the wanted gender
+  const vg=arVoice?voiceGender(arVoice):'?';
+  if(vg===voiceCfg.g)return 1;
+  return voiceCfg.g==='f'?(vg==='m'?1.35:1.1):(vg==='f'?0.7:0.9);
+}
+function updateHint(){
+  const h=document.getElementById('voiceHint');if(!h)return;const vs=arVoices();
+  const hasG=vs.some(v=>voiceGender(v)===voiceCfg.g);
+  let t='الأصوات من جهازك نفسه. ';
+  if(!vs.length)t+='جهازك ما فيه صوت عربي. ';
+  else if(!hasG)t+=`ما لقيت في جهازك صوت ${genderLabel(voiceCfg.g)} عربي، فغيّرت طبقة الصوت المتاح. `;
+  t+='لصوت أوضح على الآيباد/الآيفون: الإعدادات ← تسهيلات الاستخدام ← المحتوى المنطوق ← الأصوات ← العربية، ونزّل صوتاً «محسّناً»، ثم حدّث الصفحة.';
+  h.textContent=t;
+}
+function setGender(g){
+  voiceCfg.g=g;voiceCfg.uri=null;saveVoice();
+  document.querySelectorAll('#voiceBar .seg button').forEach(b=>b.setAttribute('aria-pressed',b.dataset.g===g));
+  document.getElementById('agentName').textContent=g==='m'?'سعد':'سارة';
+  fillVoices();
+}
+function pickVoice(){fillVoices();}
+function personalize(text){return voiceCfg.g==='m'?text.replace(/سارة/g,'سعد').replace(/موظفة/g,'موظف'):text;}
+if(synth){try{synth.onvoiceschanged=fillVoices;}catch(e){}}
+document.querySelectorAll('#voiceBar .seg button').forEach(b=>b.onclick=()=>setGender(b.dataset.g));
+document.getElementById('voiceSel').onchange=e=>{arVoice=arVoices().find(v=>v.voiceURI===e.target.value)||arVoice;voiceCfg.uri=arVoice&&arVoice.voiceURI;saveVoice();};
+document.getElementById('rateIn').value=voiceCfg.rate;
+document.getElementById('rateIn').oninput=e=>{voiceCfg.rate=+e.target.value;saveVoice();};
+document.getElementById('voiceTest').onclick=()=>speakOut(personalize('هلا والله، معك سارة من خدمة التوصيل. طلبك بيوصلك بكرة إن شاء الله.'));
+setTimeout(()=>setGender(voiceCfg.g),0);setTimeout(fillVoices,700);
 function speakOut(text){
-  if(live.tts&&!live.listening){live.tts.speak(text,{rate:1}).catch(()=>{});return;}
   if(!synth||live.muted)return;
-  try{synth.cancel();const u=new SpeechSynthesisUtterance(text);u.lang=arVoice?arVoice.lang:'ar-SA';if(arVoice)u.voice=arVoice;u.rate=1;
-    u.onstart=()=>{L.tts.textContent='· تتكلم بصوت';};u.onend=()=>{L.tts.textContent='';};synth.speak(u);}catch(e){}
+  try{synth.cancel();const u=new SpeechSynthesisUtterance(text);u.lang=arVoice?arVoice.lang:'ar-SA';if(arVoice)u.voice=arVoice;
+    u.rate=voiceCfg.rate;u.pitch=pitchFor();
+    u.onstart=()=>{L.tts.textContent=voiceCfg.g==='m'?'· يتكلم بصوت':'· تتكلم بصوت';};u.onend=()=>{L.tts.textContent='';};synth.speak(u);}catch(e){}
 }
 function hush(){if(live.tts){try{live.tts.stop();}catch(e){}}if(synth){try{synth.cancel();}catch(e){}}L.tts.textContent='';}
 const AGENT_OPENING="حياك الله يا أستاذ فهد، معك سارة من خدمة التوصيل. طلبك رقم أربعة خمسة اثنين سبعة بيوصلك بكرة الأحد بين الساعة عشرة الصبح وحدة الظهر، والمندوب بيتصل عليك قبل ما يوصل بنص ساعة. تبي أأكد لك الموعد ولا تفضل وقت ثاني؟";
@@ -503,11 +565,12 @@ function renderAgent(){L.agentLine.innerHTML=live.words.map((w,i)=>{
   const mark=(live.stopped&&i===live.idx)?'<span class="stopmark">STOP</span>':'';
   return mark+`<span class="${cls}">${w}</span>`;}).join(' ')+((live.stopped&&live.idx>=live.words.length)?'':'');}
 function agentSay(text){
+  text=personalize(text);
   clearInterval(live.timer); live.words=text.split(/\s+/).filter(Boolean); live.idx=0; live.talking=true; live.stopped=false;
   live.spoken=text; live.onset=null; renderAgent();
   speakOut(text);
   live.timer=setInterval(()=>{live.idx++;renderAgent();if(live.idx>=live.words.length){clearInterval(live.timer);live.talking=false;
-    live.history.push({role:'assistant',content:text});logRow('انتهى','KEEP','الوكيل أنهى جملته، ودوره الآن ينتظر ردك.');}},360);
+    live.history.push({role:'assistant',content:text});logRow('انتهى','KEEP','الوكيل أنهى جملته، ودوره الآن ينتظر ردك.');}},Math.round(360/voiceCfg.rate));
 }
 function agentStop(why){
   clearInterval(live.timer); live.talking=false; live.stopped=true; renderAgent();
@@ -610,7 +673,7 @@ L.mic.onclick=()=>{
   if(!d&&SRec){L.mic.hidden=false;L.note.textContent='اضغط 🎙 واسمح بالمايكروفون، وتكلم أثناء كلام الوكيل. استخدم سماعة أذن إن أمكن: بدونها يلتقط المايك صوت الوكيل، والنظام يتعرف عليه كصدى ويتجاهله.';}
   if(!s){L.note.textContent+=' الرد هنا من وكيل مدمج بقواعد بسيطة.';}
 })();
-renderAgent(); L.agentLine.innerHTML='<span class="meta">اضغط «ابدأ المكالمة» وستبدأ سارة الكلام.</span>';
+renderAgent(); L.agentLine.innerHTML='<span class="meta">اضغط «ابدأ المكالمة» وسيبدأ الوكيل الكلام.</span>';
 
 /* ---------- recording analysis with the real Python system (Pyodide) ---------- */
 const PY=JSON.parse(document.getElementById('pysrc').textContent);
