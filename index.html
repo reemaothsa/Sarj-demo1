@@ -551,6 +551,18 @@ function speakOut(text){
 }
 function hush(){if(live.tts){try{live.tts.stop();}catch(e){}}if(synth){try{synth.cancel();}catch(e){}}L.tts.textContent='';}
 const AGENT_OPENING="حياك الله يا أستاذ فهد، معك سارة من خدمة التوصيل. طلبك رقم أربعة خمسة اثنين سبعة بيوصلك بكرة الأحد بين الساعة عشرة الصبح وحدة الظهر، والمندوب بيتصل عليك قبل ما يوصل بنص ساعة. تبي أأكد لك الموعد ولا تفضل وقت ثاني؟";
+/* AI agent: replies come from your own server (worker/worker.js on Cloudflare), which keeps the API key secret.
+   Put the worker's address here, e.g. "https://sarj-agent.yourname.workers.dev". Empty = built-in rule replies. */
+const AI_URL="";
+async function aiSample(msgs){
+  if(voiceCfg.g==='m')msgs=msgs.map(m=>({...m,content:personalize(m.content).replace('موظفة','موظف')}));
+  const ctl=new AbortController();const to=setTimeout(()=>ctl.abort(),15000);
+  try{const r=await fetch(AI_URL,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({messages:msgs}),signal:ctl.signal});
+    const j=await r.json().catch(()=>({}));
+    if(!r.ok||!j.text){const e=new Error(j.error||'ai_failed');e.code=r.status===429?'rate_limited':'ai_failed';throw e;}
+    return {text:j.text};}
+  finally{clearTimeout(to);}
+}
 const SYS="أنت «سارة»، موظفة خدمة عملاء صوتية في شركة توصيل سعودية، في مكالمة هاتفية مع العميل «فهد». تكلّم بلهجة سعودية بيضاء ودودة، وجملة أو جملتين فقط (أقل من ٣٠ كلمة)، بلا رموز أو تنسيق أو إيموجي، لأن كلامك يُقرأ بصوت. السياق: طلبه رقم ٤٥٢٧، الموعد الحالي الأحد من ١٠ الصبح إلى ١ الظهر، والمواعيد المتاحة: الاثنين أو الثلاثاء، الصبح (١٠–١) أو العصر (٤–٨). إذا قاطعك العميل فلا تكرر ما قلته، ورد على كلامه مباشرة. اكتب فقط ما ستقوله.";
 const L={agentLine:document.getElementById('agentLine'),log:document.getElementById('log'),heard:document.getElementById('heard'),
   start:document.getElementById('startCall'),mic:document.getElementById('micBtn'),say:document.getElementById('sayIn'),
@@ -625,14 +637,14 @@ async function reply(){
   logRow('TAKE_TURN','TAKE_TURN',`أخذ الدور بعد: «${said}»`);
   live.history.push({role:'user',content:said});
   if(!live.sample){agentSay(ruleReply(said));return;}
-  live.busy=true; L.agentLine.innerHTML='<span class="meta">سارة تفكر…</span>';
+  live.busy=true; L.agentLine.innerHTML='<span class="meta">'+(voiceCfg.g==='m'?'سعد يفكر…':'سارة تفكر…')+'</span>';
   const msgs=[]; live.history.forEach((m,i)=>{
     const prev=msgs[msgs.length-1];
     if(prev&&prev.role===m.role)prev.content+='\n'+m.content; else msgs.push({...m});});
   if(msgs[0].role!=='user')msgs.unshift({role:'user',content:'(بداية المكالمة)'});
   msgs[0].content=SYS+'\n\n'+msgs[0].content;
   try{const r=await live.sample(msgs,{modelTier:'quick',cache:false});agentSay(r.text.trim().replace(/[*#_`]/g,''));}
-  catch(e){logRow('خطأ','STOP',e&&e.code==='rate_limited'?'كثرت الطلبات، انتظر قليلاً ثم حاول.':'تعذر رد الذكاء الاصطناعي الآن.');}
+  catch(e){logRow('خطأ','STOP',e&&e.code==='rate_limited'?'كثرت الطلبات، رد بديل من الوكيل المدمج.':'تعذر رد الذكاء الاصطناعي، رد بديل من الوكيل المدمج.');live.busy=false;agentSay(ruleReply(said));return;}
   live.busy=false;
 }
 function sayTyped(){const v=L.say.value;if(!v.trim())return;L.say.value='';L.heard.textContent='قلت: '+v;
@@ -663,7 +675,7 @@ L.mic.onclick=()=>{
   live.dict.start().catch(e=>{L.note.textContent=e&&e.code==='not_granted'?'رُفض إذن المايكروفون. استخدم الكتابة.':'تعذر تشغيل المايكروفون، جرّب مرة ثانية أو اكتب.';});
 };
 (async()=>{
-  const [s,t,d]=await Promise.all(['sample','tts','dictation'].map(()=>Promise.resolve(null)));
+  const [s,t,d]=await Promise.all(['sample','tts','dictation'].map(n=>Promise.resolve(n==='sample'&&AI_URL?aiSample:null)));
   live.sample=s; live.tts=t; live.dict=d;
   if(t){t.onState(({state})=>{L.tts.textContent=state==='speaking'?'· تتكلم بصوت':'';});}
   if(d){L.mic.hidden=false; L.note.textContent='اضغط 🎙 وتكلم أثناء كلام الوكيل. أثناء الاستماع يظهر كلام الوكيل نصاً فقط (المتصفح لا يسمح بالصوت والمايكروفون معاً).';
@@ -671,7 +683,7 @@ L.mic.onclick=()=>{
     d.onPartial(({text})=>{L.heard.innerHTML=`<span class="p">${text}</span>`;judge(text,false);});
     d.onFinal(({text})=>{L.heard.textContent='سمعت: '+text;judge(text,true);});}
   if(!d&&SRec){L.mic.hidden=false;L.note.textContent='اضغط 🎙 واسمح بالمايكروفون، وتكلم أثناء كلام الوكيل. استخدم سماعة أذن إن أمكن: بدونها يلتقط المايك صوت الوكيل، والنظام يتعرف عليه كصدى ويتجاهله.';}
-  if(!s){L.note.textContent+=' الرد هنا من وكيل مدمج بقواعد بسيطة.';}
+  L.note.textContent+=s?' الردود يؤلفها الذكاء الاصطناعي لحظياً.':' الرد هنا من وكيل مدمج بقواعد بسيطة.';
 })();
 renderAgent(); L.agentLine.innerHTML='<span class="meta">اضغط «ابدأ المكالمة» وسيبدأ الوكيل الكلام.</span>';
 
