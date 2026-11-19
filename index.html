@@ -551,17 +551,37 @@ function speakOut(text){
 }
 function hush(){if(live.tts){try{live.tts.stop();}catch(e){}}if(synth){try{synth.cancel();}catch(e){}}L.tts.textContent='';}
 const AGENT_OPENING="حياك الله يا أستاذ فهد، معك سارة من خدمة التوصيل. طلبك رقم أربعة خمسة اثنين سبعة بيوصلك بكرة الأحد بين الساعة عشرة الصبح وحدة الظهر، والمندوب بيتصل عليك قبل ما يوصل بنص ساعة. تبي أأكد لك الموعد ولا تفضل وقت ثاني؟";
-/* AI agent: replies come from your own server (worker/worker.js on Cloudflare), which keeps the API key secret.
-   Put the worker's address here, e.g. "https://sarj-agent.yourname.workers.dev". Empty = built-in rule replies. */
-const AI_URL="";
+/* AI agent: Google Gemini API, called straight from the browser. Several keys: when one fails or runs out, the next is used. */
+const GEMINI_KEYS=[
+  "AQ.Ab8RN6Kty7Fznu0rG8d2D_rmn0ji_f1GJKw31BsMr-nSrXLTlw",
+  "AQ.Ab8RN6JQ1H1arr1oNM5Y08G5kOJwqp1eSdHx0TrmnYHt42Ss8Q",
+  "AQ.Ab8RN6J2HQN8R9iFLrgGmDWkgL0NxnRolDQ9VbUTNj1IObf9sg",
+];
+const GEMINI_MODELS=["gemini-4-hydrogen","gemini-2.5-flash"];
+const AI_URL=GEMINI_KEYS.length?'gemini':'';
+let keyIdx=0;
 async function aiSample(msgs){
   if(voiceCfg.g==='m')msgs=msgs.map(m=>({...m,content:personalize(m.content).replace('موظفة','موظف')}));
-  const ctl=new AbortController();const to=setTimeout(()=>ctl.abort(),15000);
-  try{const r=await fetch(AI_URL,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({messages:msgs}),signal:ctl.signal});
-    const j=await r.json().catch(()=>({}));
-    if(!r.ok||!j.text){const e=new Error(j.error||'ai_failed');e.code=r.status===429?'rate_limited':'ai_failed';throw e;}
-    return {text:j.text};}
-  finally{clearTimeout(to);}
+  const contents=msgs.map(m=>({role:m.role==='assistant'?'model':'user',parts:[{text:m.content}]}));
+  let last;
+  for(let k=0;k<GEMINI_KEYS.length;k++){
+    const ki=(keyIdx+k)%GEMINI_KEYS.length, key=GEMINI_KEYS[ki];
+    let keyBad=false;
+    for(const model of GEMINI_MODELS){
+      const ctl=new AbortController();const to=setTimeout(()=>ctl.abort(),20000);
+      try{
+        const r=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,{method:'POST',
+          headers:{'content-type':'application/json','x-goog-api-key':key},body:JSON.stringify({contents}),signal:ctl.signal});
+        const j=await r.json().catch(()=>({}));
+        const text=((j.candidates||[])[0]?.content?.parts||[]).filter(p=>p.text&&!p.thought).map(p=>p.text).join(' ').trim();
+        if(r.ok&&text){keyIdx=ki;return {text};}
+        last=new Error((j.error&&j.error.message)||'empty reply');last.code=r.status===429?'rate_limited':'ai_failed';
+        if(r.status===401||r.status===403||r.status===429){keyBad=true;break;}   // this key is done: try the next key
+      }catch(e){last=e;}finally{clearTimeout(to);}
+    }
+    if(!keyBad&&last&&last.name!=='AbortError'&&last.code!=='ai_failed')break;
+  }
+  console.warn('Gemini:',last&&last.message);throw last;
 }
 const SYS="أنت «سارة»، موظفة خدمة عملاء صوتية في شركة توصيل سعودية، في مكالمة هاتفية مع العميل «فهد». تكلّم بلهجة سعودية بيضاء ودودة، وجملة أو جملتين فقط (أقل من ٣٠ كلمة)، بلا رموز أو تنسيق أو إيموجي، لأن كلامك يُقرأ بصوت. السياق: طلبه رقم ٤٥٢٧، الموعد الحالي الأحد من ١٠ الصبح إلى ١ الظهر، والمواعيد المتاحة: الاثنين أو الثلاثاء، الصبح (١٠–١) أو العصر (٤–٨). إذا قاطعك العميل فلا تكرر ما قلته، ورد على كلامه مباشرة. اكتب فقط ما ستقوله.";
 const L={agentLine:document.getElementById('agentLine'),log:document.getElementById('log'),heard:document.getElementById('heard'),
@@ -644,7 +664,7 @@ async function reply(){
   if(msgs[0].role!=='user')msgs.unshift({role:'user',content:'(بداية المكالمة)'});
   msgs[0].content=SYS+'\n\n'+msgs[0].content;
   try{const r=await live.sample(msgs,{modelTier:'quick',cache:false});agentSay(r.text.trim().replace(/[*#_`]/g,''));}
-  catch(e){logRow('خطأ','STOP',e&&e.code==='rate_limited'?'كثرت الطلبات، رد بديل من الوكيل المدمج.':'تعذر رد الذكاء الاصطناعي، رد بديل من الوكيل المدمج.');live.busy=false;agentSay(ruleReply(said));return;}
+  catch(e){logRow('خطأ','STOP',e&&e.code==='rate_limited'?'كثرت الطلبات، رد بديل من الوكيل المدمج.':'تعذر رد الذكاء الاصطناعي ('+((e&&e.message)||'').slice(0,80)+')، رد بديل من الوكيل المدمج.');live.busy=false;agentSay(ruleReply(said));return;}
   live.busy=false;
 }
 function sayTyped(){const v=L.say.value;if(!v.trim())return;L.say.value='';L.heard.textContent='قلت: '+v;
