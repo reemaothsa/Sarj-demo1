@@ -171,7 +171,7 @@ footer{padding-block:28px;color:var(--muted);font-size:13px}
 </head>
 <body>
 <header class="top"><div class="wrap">
-  <div class="brand"><span class="dot" aria-hidden="true"></span>TurnSense <span class="state" title="If you do not see v3.1, refresh the page">v3.1</span></div>
+  <div class="brand"><span class="dot" aria-hidden="true"></span>TurnSense <span class="state" title="If you do not see v3.2, refresh the page">v3.2</span></div>
   <nav aria-label="Sections">
     <a href="#live">Live call</a><a href="#how">How it works</a><a href="#calls">The 24 calls</a><a href="#words">Word layer</a><a href="#results">Results</a><a href="#limits">Limits</a>
   </nav>
@@ -492,36 +492,31 @@ for(const [id,list] of Object.entries(ex)){const el=document.getElementById(id);
    agent voice: Gemini TTS played through Web Audio (its samples also feed the system as the echo reference)
    agent brain: Gemini, which hears the caller's audio directly and answers in Saudi Arabic
    ===================================================================================================== */
-const GEMINI_KEYS=[
-  "AQ.Ab8RN6Kty7Fznu0rG8d2D_rmn0ji_f1GJKw31BsMr-nSrXLTlw",
-  "AQ.Ab8RN6JQ1H1arr1oNM5Y08G5kOJwqp1eSdHx0TrmnYHt42Ss8Q",
-  "AQ.Ab8RN6J2HQN8R9iFLrgGmDWkgL0NxnRolDQ9VbUTNj1IObf9sg",
-];
+/* Google rejects Gemini keys sent from a web page, so the page talks to a small relay (worker/worker.js on Cloudflare)
+   that holds the keys. Put the relay's address here, e.g. "https://turnsense.yourname.workers.dev". */
+const AI_RELAY="";
 const CHAT_MODELS=["gemini-3.8-flash-lite","gemini-3.8-flash","gemini-2.5-flash"];
 const TTS_MODELS=["gemini-3.8-flash-lite-tts","gemini-3.8-flash-tts","gemini-2.5-flash-preview-tts"];
-let keyIdx=0; const deadModel={};
 
 async function gemini(models,body,timeoutMs){
+  if(!AI_RELAY)throw new Error('AI relay not set up yet');
   let last;
-  for(let k=0;k<GEMINI_KEYS.length;k++){
-    const ki=(keyIdx+k)%GEMINI_KEYS.length, key=GEMINI_KEYS[ki]; let nextKey=false;
-    for(const model of models){
-      if(deadModel[model])continue;
-      const ctl=new AbortController(), to=setTimeout(()=>ctl.abort(),timeoutMs||25000);
-      try{
-        const r=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(key)}`,{method:'POST',
-          headers:{'content-type':'application/json'},body:JSON.stringify(body),signal:ctl.signal});
-        const j=await r.json().catch(()=>({}));
-        if(r.ok&&j.candidates&&j.candidates.length){keyIdx=ki;return j;}
-        last=new Error((j.error&&j.error.message)||('HTTP '+r.status));last.status=r.status;
-        if(r.status===404)deadModel[model]=true;                 // model not available: never try it again
-        if(r.status===401||r.status===403||r.status===429){nextKey=true;break;}
-      }catch(e){last=e;}finally{clearTimeout(to);}
-    }
-    if(!nextKey)break;
+  for(const model of models){
+    if(deadModel[model])continue;
+    const ctl=new AbortController(), to=setTimeout(()=>ctl.abort(),timeoutMs||25000);
+    try{
+      const r=await fetch(`${AI_RELAY}/v1beta/models/${model}:generateContent`,{method:'POST',
+        headers:{'content-type':'application/json'},body:JSON.stringify(body),signal:ctl.signal});
+      const j=await r.json().catch(()=>({}));
+      if(r.ok&&j.candidates&&j.candidates.length)return j;
+      last=new Error((j.error&&j.error.message)||('HTTP '+r.status));last.status=r.status;
+      if(r.status===404||r.status===400)deadModel[model]=r.status===404;   // try the next model
+      if(r.status===429||r.status===401||r.status===403)break;              // all keys on the relay are out
+    }catch(e){last=e;}finally{clearTimeout(to);}
   }
   throw last||new Error('no model answered');
 }
+const deadModel={};
 const partsOf=j=>((j.candidates||[])[0]?.content?.parts)||[];
 
 const ORDER={name:'فهد',id:'٤٥٢٧'};
@@ -807,8 +802,9 @@ setInterval(wordTick,800);
 document.getElementById('aiCheck').onclick=async()=>{
   const b=document.getElementById('aiCheck'); b.disabled=true; if(!live.t0)live.t0=performance.now();
   const step=async(name,fn)=>{try{const m=await fn();logRow('✓ '+name,'KEEP',m);}catch(e){logRow('✗ '+name,'STOP',String(e.message||e).slice(0,140));}};
-  await step('KEY',async()=>{const r=await fetch('https://generativelanguage.googleapis.com/v1beta/models?pageSize=5&key='+encodeURIComponent(GEMINI_KEYS[keyIdx]));
-    if(!r.ok)throw new Error('HTTP '+r.status+' '+((await r.json().catch(()=>({}))).error||{}).message);return 'API key accepted';});
+  await step('RELAY',async()=>{if(!AI_RELAY)throw new Error('AI relay not set up yet (AI_RELAY is empty)');
+    const r=await fetch(AI_RELAY+'/check');const j=await r.json().catch(()=>({}));
+    if(!r.ok||!j.ok)throw new Error((j.error&&j.error.message)||('HTTP '+r.status));return `relay OK, ${j.keys} key(s) accepted by Google`;});
   await step('CHAT',async()=>{const r=await aiReply([{role:'model',text:'هلا والله، معك سارة من خدمة التوصيل. أكلم الأستاذ فهد؟'},{role:'user',text:'إيه نعم معك'}]);return 'Reply: '+r.reply;});
   await step('VOICE',async()=>{ttsCache.delete(ttsKeyOf('تمام'));const a=await ttsPcm('تمام');return `Gemini voice OK (${(a.pcm.length/a.rate).toFixed(1)} s of audio)`;});
   b.disabled=false;
