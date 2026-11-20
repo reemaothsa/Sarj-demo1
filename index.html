@@ -171,7 +171,7 @@ footer{padding-block:28px;color:var(--muted);font-size:13px}
 </head>
 <body>
 <header class="top"><div class="wrap">
-  <div class="brand"><span class="dot" aria-hidden="true"></span>TurnSense <span class="state" title="If you do not see v3.2, refresh the page">v3.2</span></div>
+  <div class="brand"><span class="dot" aria-hidden="true"></span>TurnSense <span class="state" title="If you do not see v3.3, refresh the page">v3.3</span></div>
   <nav aria-label="Sections">
     <a href="#live">Live call</a><a href="#how">How it works</a><a href="#calls">The 24 calls</a><a href="#words">Word layer</a><a href="#results">Results</a><a href="#limits">Limits</a>
   </nav>
@@ -182,6 +182,11 @@ footer{padding-block:28px;color:var(--muted);font-size:13px}
   <h1>A voice agent that knows when to stop, when to keep going, and when to answer</h1>
   <p class="lede">The caller says «<span class="ar">إيه</span>», coughs, or the TV is on: the agent must keep talking. The caller says «<span class="ar">لحظة</span>» or «<span class="ar">لا لا</span>»: the agent must stop within 300 ms. TurnSense learns this caller's own voice from their reply to the greeting, then only yields when <em>they</em> insist on talking.</p>
   <div class="kpis" id="kpis"></div>
+  <div class="kpis">
+    <div class="kpi"><div class="label">Organisers' checkpoint · 16 new, unseen calls</div><div class="val"><span class="to">90.1</span></div><div class="note">7 of 7 real interruptions caught · median stop 0 ms after the intent was clear · end of turn 86</div></div>
+    <div class="kpi"><div class="label">TurnSense v2 · 24 dev calls, real time</div><div class="val"><span class="from">90.2</span><span class="to">92.7</span></div><div class="note">final submission, run live on the team laptop</div></div>
+    <div class="kpi"><div class="label">TurnSense v2 · frozen holdout (scored once)</div><div class="val"><span class="from">80.1</span><span class="to">89.2</span></div><div class="note">25 calls with real recorded noises, never used to tune</div></div>
+  </div>
 </div></section>
 
 <section id="live"><div class="wrap">
@@ -287,7 +292,27 @@ footer{padding-block:28px;color:var(--muted);font-size:13px}
 </div></section>
 
 <section id="results"><div class="wrap">
-  <h2>Results on the development set</h2>
+  <h2>Final version: TurnSense v2</h2>
+  <p class="lede">The checkpoint confirmed that v1 generalises (90.1 on 16 unseen calls vs 90.2 on dev). v2 adds one thing: a small neural speech check, so that genuine recorded noises can no longer stop the agent.</p>
+  <div class="cols">
+    <div class="panel"><h3>What changed from v1</h3>
+      <ul class="lim">
+        <li><b>Neural speech check.</b> Silero VAD v6 (MIT licence, 2.3 MB, runs on the laptop CPU, no internet). While the agent talks, a frame only counts as the caller taking the floor if the VAD agrees it is human speech (probability ≥ 0.3).</li>
+        <li><b>Evidence retuned.</b> Stop threshold 400 → 350 ms, burst gap 900 → 1200 ms, slower decay, so «لا لا … لحظة» with a pause still adds up.</li>
+        <li><b>Safe fallback.</b> If the model cannot load, the system runs the exact v1 settings.</li>
+        <li><b>No external service.</b> Everything runs locally.</li>
+      </ul></div>
+    <div class="panel"><h3>v1 → v2, official scorer</h3>
+      <div class="tablewrap"><table><thead><tr><th>Set</th><th>v1</th><th>v2</th></tr></thead><tbody>
+        <tr><td>Dev, 24 calls (real time on the laptop)</td><td class="n">90.2</td><td class="n" style="color:var(--accent);font-weight:500">92.7</td></tr>
+        <tr><td>Extra set xdev, 25 calls with real recorded noises</td><td class="n">82.3</td><td class="n" style="color:var(--accent);font-weight:500">95.0</td></tr>
+        <tr><td>Holdout, 25 calls, scored once, never used to tune</td><td class="n">80.1</td><td class="n" style="color:var(--accent);font-weight:500">89.2</td></tr>
+        <tr><td>Worst case over quieter / louder microphone</td><td class="n">80.0</td><td class="n" style="color:var(--accent);font-weight:500">89.7</td></tr>
+        <tr><td>False stops on real horn, vacuum, cough, laugh (xdev restraint S)</td><td class="n">0.78</td><td class="n" style="color:var(--accent);font-weight:500">0.97</td></tr>
+      </tbody></table></div>
+      <p class="meta">Neighbouring settings (VAD 0.25–0.35, stop 340–350 ms) give the same scores: a plateau, not a lucky peak.</p></div>
+  </div>
+  <h2>Results on the development set (v1)</h2>
   <p class="lede">Scored with the official <span class="num">ttbench/score.py</span>, offline with exact timing. Core = 100 × (0.9 F + 0.1 A), where F combines responsiveness R and restraint S.</p>
   <div class="cols">
     <div class="panel"><h3>Per category: stops when it should (R), keeps going when it should (S)</h3><div class="catbars" id="cats"></div></div>
@@ -303,12 +328,12 @@ footer{padding-block:28px;color:var(--muted);font-size:13px}
 <section id="limits"><div class="wrap">
   <h2>Limits, honestly</h2>
   <ul class="lim">
-    <li>Thresholds were chosen on only 24 synthetic calls. We picked values in the middle of the working range, not the peak, but generalisation to the hidden calls is unproven.</li>
-    <li>A short lone «<span class="ar">لحظة</span>» and a long «<span class="ar">إيه والله صادق، صح</span>» are acoustically almost identical. Those two errors need words.</li>
+    <li>v1 thresholds were chosen on only 24 synthetic calls. The organisers' checkpoint (16 unseen calls, Core 90.1) suggests they generalise; v2 was also checked once on a frozen holdout set (89.2).</li>
+    <li>A short lone «<span class="ar">لحظة</span>» and a long «<span class="ar">إيه والله صادق، صح</span>» are acoustically almost identical. These remain v2's errors on dev (GI-D03, BC-D02, BC-D03) and need real-time words.</li>
     <li>The system assumes the caller answers the greeting. Before that it uses a more careful threshold (700 ms).</li>
     <li>End of turn was measured on only two development cases.</li>
     <li>These numbers come from offline evaluation. The official real-time run must be repeated before submission, and network delay counts: Core 90.2 at 20 ms and 88.1 at 150 ms.</li>
-    <li>In the live demo, replies, the agent's voice and the live transcription for the word layer come from Google Gemini; the stop / take-turn decisions are TurnSense's own, made from your audio and those words.</li>
+    <li>The live demo on this page runs the v1 engine in the browser (the neural check needs onnxruntime, which the browser version does not load). In the live demo, replies, the agent's voice and the live transcription for the word layer come from Google Gemini; the stop / take-turn decisions are TurnSense's own, made from your audio and those words.</li>
   </ul>
   <h3>Run it yourself</h3>
 <pre>pip install -r requirements.txt
@@ -334,7 +359,7 @@ const esc = s => String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&g
 /* ---------- KPIs ---------- */
 (function(){
   const o=D.ours,b=D.base;
-  const k=[['Core score',b.core.toFixed(1),o.core.toFixed(1),'out of 100, on 24 calls'],
+  const k=[['Core score · v1 vs kit baseline',b.core.toFixed(1),o.core.toFixed(1),'out of 100, on 24 dev calls'],
            ['False stops',String(b.false_stops),String(o.false_stops),'agent stopped, caller did not want the floor'],
            ['Restraint S',b.S.toFixed(2),o.S.toFixed(2),'keeps going when it should'],
            ['End of turn',b.eot.toFixed(1),o.eot.toFixed(1),'separate ranking from Core']];
